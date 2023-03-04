@@ -36,7 +36,7 @@ public class Chat : MonoBehaviour
         StartCoroutine(ChatCompletionRequest());
     }
 
-    public IEnumerator ChatCompletionRequest()
+    IEnumerator ChatCompletionRequest()
     {
         sendButton.interactable = false;
 
@@ -60,7 +60,7 @@ public class Chat : MonoBehaviour
         sendButton.interactable = true;
     }
 
-    public void AppendMessage(OpenAIChatCompletionAPI.Message message)
+    void AppendMessage(OpenAIChatCompletionAPI.Message message)
     {
         context.Add(message);
 
