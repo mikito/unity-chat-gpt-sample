@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using Cysharp.Threading.Tasks;
 
 public class Chat : MonoBehaviour
 {
@@ -33,28 +34,27 @@ public class Chat : MonoBehaviour
         AppendMessage(message);
         inputField.text = "";
 
-        StartCoroutine(ChatCompletionRequest());
+        ChatCompletionRequest().Forget();
     }
 
-    IEnumerator ChatCompletionRequest()
+    async UniTask ChatCompletionRequest()
     {
         sendButton.interactable = false;
 
-        yield return null;
+        var cancellationToken = this.GetCancellationTokenOnDestroy();
+
+        await UniTask.DelayFrame(1, cancellationToken:cancellationToken);
         scrollRect.verticalNormalizedPosition = 0;
 
-        var request = chatCompletionAPI.CreateCompletionRequest(
-            new OpenAIChatCompletionAPI.RequestData() { messages = context }
+        var response = await chatCompletionAPI.CreateCompletionRequest(
+            new OpenAIChatCompletionAPI.RequestData() { messages = context },
+            cancellationToken
         );
 
-        yield return request.Send();
-
-        if (request.IsError) throw new System.Exception(request.Error);
-
-        var message = request.Response.choices[0].message;
+        var message = response.choices[0].message;
         AppendMessage(message);
 
-        yield return null;
+        await UniTask.DelayFrame(1, cancellationToken:cancellationToken);
         scrollRect.verticalNormalizedPosition = 0;
 
         sendButton.interactable = true;

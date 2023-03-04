@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Networking;
 using Newtonsoft.Json;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 
 // https://platform.openai.com/docs/api-reference/chat/create
 public class OpenAIChatCompletionAPI
@@ -11,57 +13,27 @@ public class OpenAIChatCompletionAPI
     string apiKey;
     JsonSerializerSettings settings = new JsonSerializerSettings();
 
-
     public OpenAIChatCompletionAPI(string apiKey)
     {
         this.apiKey = apiKey;
         settings.NullValueHandling = NullValueHandling.Ignore;
     }
 
-    public RequestHandler CreateCompletionRequest(RequestData requestData)
+    public async UniTask<ResponseData> CreateCompletionRequest(RequestData requestData, CancellationToken cancellationToken)
     {
         var json = JsonConvert.SerializeObject(requestData, settings);
 
         byte[] data = System.Text.Encoding.UTF8.GetBytes(json);
 
-        var request = new UnityWebRequest(API_URL, "POST");
-        request.SetRequestHeader("Authorization", $"Bearer {apiKey}");
-        request.SetRequestHeader("Content-Type", "application/json");
-        request.uploadHandler = new UploadHandlerRaw(data);
-        request.downloadHandler = new DownloadHandlerBuffer();
-
-        return new RequestHandler(request);
-    }
-
-    public class RequestHandler
-    {
-        public bool IsCompleted { get; private set; }
-        public bool IsError => Error != null;
-        public string Error { get; private set; }
-        public ResponseData Response { get; private set; }
-
-        UnityWebRequest request;
-
-        public RequestHandler(UnityWebRequest request)
+        using (var request = new UnityWebRequest(API_URL, "POST"))
         {
-            this.request = request;
-        }
+            request.SetRequestHeader("Authorization", $"Bearer {apiKey}");
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.uploadHandler = new UploadHandlerRaw(data);
+            request.downloadHandler = new DownloadHandlerBuffer();
 
-        public IEnumerator Send()
-        {
-            using (request)
-            {
-                yield return request.SendWebRequest();
-
-                if (request.result != UnityWebRequest.Result.Success)
-                {
-                    Error = "[OpenAIChatCompletionAPI] " + request.error + "\n\n" + request.downloadHandler.text;
-                }
-                else
-                {
-                    Response = JsonConvert.DeserializeObject<ResponseData>(request.downloadHandler.text);
-                }
-            }
+            await request.SendWebRequest().WithCancellation(cancellationToken);
+            return JsonConvert.DeserializeObject<ResponseData>(request.downloadHandler.text);
         }
     }
 
