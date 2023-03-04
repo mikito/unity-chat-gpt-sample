@@ -9,3 +9,6 @@ ChatオブジェクトのApiKeyプロパティにキーを設定後、サンプ�
 以下のようなChatの動作を確認することができます。
 <img width="823" alt="スクリーンショット_2023-03-05_3_59_08" src="https://user-images.githubusercontent.com/1071168/222924041-78bedc9e-0f65-4995-af71-d4274ca1b7be.png">
 
+### UniTask版はこちら
+
+https://github.com/mikito/unity-chat-gpt-sample/tree/unitask
