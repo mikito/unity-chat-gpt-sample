@@ -12,6 +12,8 @@ ChatオブジェクトのApiKeyプロパティにキーを設定後、サンプ�
 ### 注意事項
 プロパティにApiKeyを設定したままコミットやリポジトリの公開などをしないように注意してください。
 
-### UniTask版はこちら
+### 他の実装
 
-https://github.com/mikito/unity-chat-gpt-sample/tree/unitask
+- [Croutine版](https://github.com/mikito/unity-chat-gpt-sample/tree/master)
+- [UniTask版](https://github.com/mikito/unity-chat-gpt-sample/tree/unitask)
+- [Streamオプション対応版](https://github.com/mikito/unity-chat-gpt-sample/tree/stream)
