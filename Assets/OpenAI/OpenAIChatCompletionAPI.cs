@@ -1,10 +1,11 @@
-using System.Collections;
+using System;
 using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.Networking;
-using Newtonsoft.Json;
 using System.Threading;
-using Cysharp.Threading.Tasks;
+using System.Threading.Tasks;
+using System.Net;
+using System.Net.Http;
+using System.Runtime.CompilerServices;
+using Newtonsoft.Json;
 
 // https://platform.openai.com/docs/api-reference/chat/create
 public class OpenAIChatCompletionAPI
@@ -12,28 +13,125 @@ public class OpenAIChatCompletionAPI
     const string API_URL = "https://api.openai.com/v1/chat/completions";
     string apiKey;
     JsonSerializerSettings settings = new JsonSerializerSettings();
+    HttpClient httpClient;
 
     public OpenAIChatCompletionAPI(string apiKey)
     {
+        this.httpClient = new HttpClient();
         this.apiKey = apiKey;
         settings.NullValueHandling = NullValueHandling.Ignore;
     }
 
-    public async UniTask<ResponseData> CreateCompletionRequest(RequestData requestData, CancellationToken cancellationToken)
+    public async Task<ResponseData> CreateCompletionRequest(RequestData requestData, CancellationToken cancellationToken)
     {
+        if(requestData.stream.HasValue && requestData.stream.Value)
+        {
+            throw new AggregateException("stream must be false.");
+        }
+
         var json = JsonConvert.SerializeObject(requestData, settings);
 
-        byte[] data = System.Text.Encoding.UTF8.GetBytes(json);
+        using var request = new HttpRequestMessage(HttpMethod.Post, API_URL);
+        request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        request.Headers.Add("Authorization", $"Bearer {apiKey}");
 
-        using (var request = new UnityWebRequest(API_URL, "POST"))
+        using var response = await httpClient.SendAsync(request);
+
+        if (response.IsSuccessStatusCode)
         {
-            request.SetRequestHeader("Authorization", $"Bearer {apiKey}");
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.uploadHandler = new UploadHandlerRaw(data);
-            request.downloadHandler = new DownloadHandlerBuffer();
+            var result = await response.Content.ReadAsStringAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            return JsonConvert.DeserializeObject<ResponseData>(result);
+        }
+        else
+        {
+            var message = await response.Content.ReadAsStringAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new WebException($"request failed. {(int)response.StatusCode} {response.StatusCode}\n{message}");
+        }
+    }
 
-            await request.SendWebRequest().WithCancellation(cancellationToken);
-            return JsonConvert.DeserializeObject<ResponseData>(request.downloadHandler.text);
+    public async IAsyncEnumerable<ResponseChunkData> CreateCompletionRequestAsStream(RequestData requestData,  [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if(!requestData.stream.HasValue || ! requestData.stream.Value)
+        {
+            throw new AggregateException("stream must be true.");
+        }
+
+        var json = JsonConvert.SerializeObject(requestData, settings);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, API_URL);
+        request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        request.Headers.Add("Authorization", $"Bearer {apiKey}");
+
+        var sw = new System.Diagnostics.Stopwatch();
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+        if (response.IsSuccessStatusCode)
+        {
+            using var stream = await response.Content.ReadAsStreamAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            int bufferSize = 1024 * 4;
+            var buffer = new byte[bufferSize];
+            var stringBuffer = "";
+            var chunks = new Queue<string>();
+
+            int read;
+            while ((read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+            {
+                if (bufferSize == read)
+                {
+                    stringBuffer += System.Text.Encoding.UTF8.GetString(buffer);
+                }
+                else
+                {
+                    var segment = new ArraySegment<byte>(buffer, 0, read);
+                    stringBuffer += System.Text.Encoding.UTF8.GetString(segment);
+                }
+
+                while (FetchChunkData(ref stringBuffer, out string data))
+                {
+                    chunks.Enqueue(data);
+                }
+
+                while (chunks.Count > 0)
+                {
+                    var chunk = chunks.Dequeue();
+                    if (chunk == "[DONE]") break;
+                    yield return JsonConvert.DeserializeObject<ResponseChunkData>(chunk);
+                }
+            }
+        }
+        else
+        {
+            var message = await response.Content.ReadAsStringAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new WebException($"request failed. {(int)response.StatusCode} {response.StatusCode}\n{message}");
+        }
+    }
+
+    public bool FetchChunkData(ref string stringBuffer, out string fetchString)
+    {
+        int index = stringBuffer.IndexOf("\n\n");
+        if (index >= 0)
+        {
+            var chank = stringBuffer.Substring(0, index);
+            stringBuffer = stringBuffer.Substring(index + 2);
+
+            if(! chank.StartsWith("data: "))
+            {
+                throw new Exception("not chank data");
+            }
+
+            fetchString = chank.Substring(6);
+
+            return true;
+        }
+        else
+        {
+            fetchString = null;
+            return false;
         }
     }
 
@@ -86,5 +184,23 @@ public class OpenAIChatCompletionAPI
         public string model;
         public Usage usage;
         public List<Choice> choices;
+    }
+
+    [System.Serializable]
+    public class ChunkChoice
+    {
+        public Message delta;
+        public int index;
+        public object finish_reason;
+    }
+
+    [System.Serializable]
+    public class ResponseChunkData
+    {
+        public string id;
+        public string @object;
+        public int created;
+        public string model;
+        public List<ChunkChoice> choices;
     }
 }
