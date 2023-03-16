@@ -64,7 +64,6 @@ public class OpenAIChatCompletionAPI
         request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
         request.Headers.Add("Authorization", $"Bearer {apiKey}");
 
-        var sw = new System.Diagnostics.Stopwatch();
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
 
         if (response.IsSuccessStatusCode)
