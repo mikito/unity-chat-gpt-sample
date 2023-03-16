@@ -71,7 +71,7 @@ public class OpenAIChatCompletionAPI
             using var stream = await response.Content.ReadAsStreamAsync();
             cancellationToken.ThrowIfCancellationRequested();
 
-            int bufferSize = 1024 * 4;
+            int bufferSize = 256;
             var buffer = new byte[bufferSize];
             var stringBuffer = "";
             var chunks = new Queue<string>();
