@@ -6,6 +6,8 @@ using System.Net;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
+using System.IO;
+using System.Text;
 
 // https://platform.openai.com/docs/api-reference/chat/create
 public class OpenAIChatCompletionAPI
@@ -24,7 +26,7 @@ public class OpenAIChatCompletionAPI
 
     public async Task<ResponseData> CreateCompletionRequest(RequestData requestData, CancellationToken cancellationToken)
     {
-        if(requestData.stream.HasValue && requestData.stream.Value)
+        if (requestData.stream.HasValue && requestData.stream.Value)
         {
             throw new AggregateException("stream must be false.");
         }
@@ -35,7 +37,7 @@ public class OpenAIChatCompletionAPI
         request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
         request.Headers.Add("Authorization", $"Bearer {apiKey}");
 
-        using var response = await httpClient.SendAsync(request);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
 
         if (response.IsSuccessStatusCode)
         {
@@ -51,9 +53,9 @@ public class OpenAIChatCompletionAPI
         }
     }
 
-    public async IAsyncEnumerable<ResponseChunkData> CreateCompletionRequestAsStream(RequestData requestData,  [EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<ResponseChunkData> CreateCompletionRequestAsStream(RequestData requestData, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if(!requestData.stream.HasValue || ! requestData.stream.Value)
+        if (!requestData.stream.HasValue || !requestData.stream.Value)
         {
             throw new AggregateException("stream must be true.");
         }
@@ -64,42 +66,23 @@ public class OpenAIChatCompletionAPI
         request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
         request.Headers.Add("Authorization", $"Bearer {apiKey}");
 
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
         if (response.IsSuccessStatusCode)
         {
             using var stream = await response.Content.ReadAsStreamAsync();
             cancellationToken.ThrowIfCancellationRequested();
 
-            int bufferSize = 256;
-            var buffer = new byte[bufferSize];
-            var stringBuffer = "";
-            var chunks = new Queue<string>();
+            using var reader = new StreamReader(stream, Encoding.UTF8);
 
-            int read;
-            while ((read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+            string line = null;
+            while ((line = await reader.ReadLineAsync()) != null)
             {
-                if (bufferSize == read)
-                {
-                    stringBuffer += System.Text.Encoding.UTF8.GetString(buffer);
-                }
-                else
-                {
-                    var segment = new ArraySegment<byte>(buffer, 0, read);
-                    stringBuffer += System.Text.Encoding.UTF8.GetString(segment);
-                }
-
-                while (FetchChunkData(ref stringBuffer, out string data))
-                {
-                    chunks.Enqueue(data);
-                }
-
-                while (chunks.Count > 0)
-                {
-                    var chunk = chunks.Dequeue();
-                    if (chunk == "[DONE]") break;
-                    yield return JsonConvert.DeserializeObject<ResponseChunkData>(chunk);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrEmpty(line)) continue;
+                var chunkString = line.Substring(6); // "data: "
+                if (chunkString == "[DONE]") break;
+                yield return JsonConvert.DeserializeObject<ResponseChunkData>(chunkString);
             }
         }
         else
@@ -107,30 +90,6 @@ public class OpenAIChatCompletionAPI
             var message = await response.Content.ReadAsStringAsync();
             cancellationToken.ThrowIfCancellationRequested();
             throw new WebException($"request failed. {(int)response.StatusCode} {response.StatusCode}\n{message}");
-        }
-    }
-
-    public bool FetchChunkData(ref string stringBuffer, out string fetchString)
-    {
-        int index = stringBuffer.IndexOf("\n\n");
-        if (index >= 0)
-        {
-            var chank = stringBuffer.Substring(0, index);
-            stringBuffer = stringBuffer.Substring(index + 2);
-
-            if(! chank.StartsWith("data: "))
-            {
-                throw new Exception("not chank data");
-            }
-
-            fetchString = chank.Substring(6);
-
-            return true;
-        }
-        else
-        {
-            fetchString = null;
-            return false;
         }
     }
 
